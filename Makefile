@@ -6,7 +6,7 @@
 #    By: alagroy- <alagroy-@student.42.fr>          +#+  +:+       +#+         #
 #                                                 +#+#+#+#+#+   +#+            #
 #    Created: 2022/02/09 14:49:38 by alagroy-          #+#    #+#              #
-#    Updated: 2022/02/23 14:55:12 by alagroy-         ###   ########.fr        #
+#    Updated: 2022/03/08 12:56:17 by alagroy-         ###   ########.fr        #
 #                                                                              #
 # **************************************************************************** #
 
@@ -54,5 +54,5 @@ fclean: clean
 
 re: fclean all
 
-.PHONY: clean re fclean all
+.PHONY: clean re fclean all test
 .SILENT:

