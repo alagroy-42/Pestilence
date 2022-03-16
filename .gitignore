@@ -58,4 +58,5 @@ dkms.conf
 
 # Test Files
 sample
+test.c
 todo.todo
