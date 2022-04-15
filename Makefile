@@ -6,7 +6,7 @@
 #    By: alagroy- <alagroy-@student.42.fr>          +#+  +:+       +#+         #
 #                                                 +#+#+#+#+#+   +#+            #
 #    Created: 2022/02/09 14:49:38 by alagroy-          #+#    #+#              #
-#    Updated: 2022/03/14 17:45:38 by alagroy-         ###   ########.fr        #
+#    Updated: 2022/03/23 15:24:57 by alagroy-         ###   ########.fr        #
 #                                                                              #
 # **************************************************************************** #
 
@@ -32,7 +32,7 @@ $(OBJDIR)%.o: $(SRCDIR)%.s $(INCLUDES) Makefile
 $(OBJDIR):
 	mkdir -p $@
 
-test: $(NAME) sample
+test: $(OBJDIR) $(NAME) sample
 	mkdir -p /tmp/test
 	mkdir -p /tmp/test2
 	touch /tmp/test/test1
